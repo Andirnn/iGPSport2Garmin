@@ -47,7 +47,12 @@ jobs:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           GARMIN_DOMAIN: ${{ secrets.GARMIN_DOMAIN || 'garmin.com' }}
-        run: python sync_igpsport_to_garmin.py
+        run: |
+          python sync_igpsport_to_garmin.py 2>&1 | tee sync_output.log
+          if grep -q "ERROR" sync_output.log; then
+            echo "Fehler im Sync-Log gefunden (siehe oben) — Schritt wird als fehlgeschlagen markiert, damit die Telegram-Meldung korrekt ist."
+            exit 1
+          fi
         
       - name: Commit changes
         run: |
