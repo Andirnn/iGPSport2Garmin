@@ -61,3 +61,15 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref }}
+
+      - name: Telegram-Benachrichtigung
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            TEXT="✅ iGPSPORT-Sync erfolgreich abgeschlossen."
+          else
+            TEXT="⚠️ iGPSPORT-Sync-Lauf mit Problem beendet (Status: ${{ job.status }}). Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$TEXT"
