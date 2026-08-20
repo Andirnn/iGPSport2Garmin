@@ -28,10 +28,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: garmin_session
-          key: ${{ runner.os }}-garmin-session-${{ github.run_id }}
+          key: ${{ runner.os }}-garmin-session
           restore-keys: |
-            ${{ runner.os }}-garmin-session-
-          
+            ${{ runner.os }}-garmin-session
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
