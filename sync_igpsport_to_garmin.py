@@ -517,6 +517,7 @@ def main():
 
     sync_count = 0
     latest_synced_date = None
+    synced_summaries = []
 
     # Download and upload activities in a batch
     for activity_info in activities_to_sync:
@@ -535,6 +536,8 @@ def main():
         if result:
             logger.info(f"Successfully uploaded activity {activity_id} to Garmin")
             sync_count += 1
+            duration_min = round(activity_info["duration"] / 60)
+            synced_summaries.append(f"{start_time.strftime('%d.%m.%Y')} — {duration_min} Min")
 
             # Update the latest synced date
             if latest_synced_date is None or start_time > latest_synced_date:
@@ -562,6 +565,10 @@ def main():
     logger.info(
         f"Sync completed: {sync_count} activities uploaded, {len(activities_to_sync) - sync_count} activities failed"
     )
+
+    if synced_summaries:
+        with open("synced_activities.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(synced_summaries))
 
 
 if __name__ == "__main__":
