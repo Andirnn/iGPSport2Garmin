@@ -69,7 +69,14 @@ jobs:
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            TEXT="✅ iGPSPORT-Sync erfolgreich abgeschlossen."
+            if [ -f synced_activities.txt ]; then
+              SUMMARY=$(cat synced_activities.txt)
+              TEXT="✅ iGPSPORT-Sync erfolgreich abgeschlossen.
+          Synchronisiert:
+          $SUMMARY"
+            else
+              TEXT="✅ iGPSPORT-Sync erfolgreich abgeschlossen (keine neue Aktivität gefunden)."
+            fi
           else
             TEXT="⚠️ iGPSPORT-Sync-Lauf mit Problem beendet (Status: ${{ job.status }}). Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
