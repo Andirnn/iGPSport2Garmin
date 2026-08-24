@@ -160,7 +160,15 @@ class IGPSportClient:
 
 
 class GarminClient:
-    """Client for the Garmin Connect API using the garth library."""
+    """Client for the Garmin Connect API using python-garminconnect (>=0.3.2).
+
+    Migrated 20.08.2026 from raw garth: since March 2026 Garmin's SSO endpoints that garth
+    uses (/mobile/api/login, /sso/signin) are widely rate-limited (429), affecting garth in
+    all versions — garth itself is now deprecated with no fix. python-garminconnect ships a
+    "widget+cffi" login strategy (/sso/embed HTML form flow) that bypasses this block, tried
+    automatically first when curl_cffi is installed. See
+    https://github.com/cyberjunky/python-garminconnect/issues/344
+    """
 
     def __init__(
         self,
@@ -172,35 +180,21 @@ class GarminClient:
     ):
         self.email = email
         self.password = password
-        self.domain = domain
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.authenticated = False
+        # domain kept for interface compatibility (was already unused in the garth version);
+        # python-garminconnect uses is_cn instead of a domain string.
+        self.client = Garmin(email, password, is_cn=(domain == "garmin.cn"))
 
     def authenticate(self, force: bool = False) -> bool:
         """
-        Authenticate with Garmin Connect.
-
-        Args:
-            force: If True, force a new authentication even if a session exists
-
-        Returns:
-            True if authentication is successful, False otherwise
+        Authenticate with Garmin Connect. login() handles session load/refresh/fresh-login
+        and persisting tokens to GARMIN_SESSION_DIR automatically — no manual save/load needed.
         """
         try:
-            # Try to load session from file first
-            if not force and self._load_session():
-                logger.info("Loaded existing Garmin session from cache")
-                self.authenticated = True
-                return True
-
-            # Perform a new login
-            logger.info("Performing new Garmin authentication")
-            garth.login(self.email, self.password)
-
-            # Save the session for future use
-            self._save_session()
-
+            logger.info("Performing Garmin authentication (login() loads cached session if valid, else fresh login)")
+            self.client.login(GARMIN_SESSION_DIR)
             logger.info("Successfully authenticated with Garmin Connect")
             self.authenticated = True
             return True
@@ -209,60 +203,17 @@ class GarminClient:
             self.authenticated = False
             return False
 
-    def _save_session(self) -> bool:
-        """Save the current Garmin session to a directory."""
-        try:
-            os.makedirs(GARMIN_SESSION_DIR, exist_ok=True)
-            garth.save(GARMIN_SESSION_DIR)
-            logger.info(f"Garmin session saved to directory: {GARMIN_SESSION_DIR}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving Garmin session: {e}")
-            return False
-
-    def _load_session(self) -> bool:
-        """Load a saved Garmin session from directory."""
-        try:
-            if not os.path.exists(GARMIN_SESSION_DIR) or not os.path.isdir(
-                GARMIN_SESSION_DIR
-            ):
-                logger.info("No saved Garmin session directory found")
-                return False
-
-            garth.resume(GARMIN_SESSION_DIR)
-
-            try:
-                garth.client.username
-                logger.info("Loaded Garmin session is valid")
-                return True
-            except Exception as e:
-                logger.info(f"Loaded Garmin session is invalid or expired: {e}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Error loading Garmin session: {e}")
-            return False
-
     def get_activities(
         self, start_date: Optional[datetime.datetime] = None, limit: int = 10
     ) -> List[Dict]:
         """Get activities from Garmin Connect."""
         try:
-            # Ensure we're authenticated
             if not self.authenticated and not self.authenticate():
                 return []
-
-            # Build the params
-            params = {"start": 0, "limit": limit}
-
-            # Make the request to the Garmin Connect API
-            response = garth.connectapi(
-                "/activitylist-service/activities/search/activities", params=params
-            )
-            return response if isinstance(response, list) else []
+            activities = self.client.get_activities(limit=limit)
+            return activities if isinstance(activities, list) else []
         except Exception as e:
             logger.error(f"Error getting activities from Garmin Connect: {e}")
-            # Try to re-authenticate on error
             self.authenticate(force=True)
             return []
 
@@ -280,7 +231,6 @@ class GarminClient:
         retries = 0
         last_error = None
 
-        # Ensure we're authenticated before attempting upload
         if not self.authenticated and not self.authenticate():
             logger.error("Cannot upload activity: Not authenticated with Garmin")
             return None
@@ -302,13 +252,10 @@ class GarminClient:
                     temp_file.write(fit_data)
                     temp_file_path = temp_file.name
 
-                with open(temp_file_path, "rb") as f:
-                    uploaded = garth.client.upload(f)
-
-                os.unlink(temp_file_path)
-
-                # Save the session after successful upload to maintain freshness
-                self._save_session()
+                try:
+                    uploaded = self.client.upload_activity(temp_file_path)
+                finally:
+                    os.unlink(temp_file_path)
 
                 logger.info(
                     f"Successfully uploaded activity to Garmin Connect: {uploaded}"
@@ -322,7 +269,6 @@ class GarminClient:
                     f"Upload attempt {retries} failed with error: {activity_name or 'Unknown Activity'}, {len(fit_data)} bytes, {e}"
                 )
 
-                # Only re-authenticate when specifically needed
                 if (
                     "authentication" in str(e).lower()
                     or "unauthorized" in str(e).lower()
@@ -336,7 +282,6 @@ class GarminClient:
                     except Exception as auth_err:
                         logger.error(f"Re-authentication failed: {auth_err}")
 
-                # Rate limiting detection - longer backoff
                 if "rate" in str(e).lower() or "too many" in str(e).lower():
                     extra_delay = 30 + random.uniform(0, 10)
                     logger.warning(
@@ -344,7 +289,6 @@ class GarminClient:
                     )
                     time.sleep(extra_delay)
 
-                # 409 Conflict detection - skip this activity and continue
                 if "409" in str(e).lower() or "conflict" in str(e).lower():
                     logger.warning(f"409 Conflict detected. Skipping activity {activity_name}")
                     return None
